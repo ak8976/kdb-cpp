@@ -82,37 +82,6 @@ K udp_send_base(int sock, K msg, char mode) {
   }
   return (K)0;
 }
-extern "C" K udp_send(K sock, K msg) {
-  if (sock->t != -KI) return krr((S) "type");
-  return udp_send_base(sock->i, msg, SYNC_BYTE);
-}
-extern "C" K udp_send_async(K sock, K msg) {
-  if (sock->t != -KI) return krr((S) "type");
-  return udp_send_base(sock->i, msg, ASYNC_BYTE);
-}
-extern "C" K udp_register(K host, K port) {
-  if (host->t != -KS || port->t != -KI) return krr((S) "type");
-  int sock = socket(AF_INET, SOCK_DGRAM, 0);
-  timeval tv{};
-  tv.tv_sec = 30;
-  if (sock < 0) return krr((S) "socket creation failed");
-  setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-  sockaddr_in dest = get_socket_info(host->s, port->i);
-  if (dest.sin_family == 0) return krr((S) "failed to resolve host");
-  sock_to_addr[sock] = dest;
-  std::cout << "Registered host=" << host->s << ", port=" << port->i << ":"
-            << sock << std::endl;
-  return ki(sock);
-}
-extern "C" K udp_deregister(K sock) {
-  if (sock->t != -KI) return krr((S) "type");
-  bool removed = sock_to_addr.erase(sock->i) > 0;
-  if (removed) {
-    close(sock->i);
-    std::cout << "Deregistered socket " << sock->i << std::endl;
-  }
-  return kb(removed);
-}
 void udp_dequeue(int sock) {
   sockaddr_in sender{};
   K serialized = ktn(KG, MSG_MAX_SIZE);
@@ -152,19 +121,43 @@ void udp_listen() {
   fcntl(sock, F_SETFL, flags | O_NONBLOCK);
   listening_socket = sock;
 }
-extern "C" K udp_event_loop_stop() {
-  if (!loop_running) return krr((S) "event loop already stopped");
-  loop_running = false;
-  close(listening_socket);
-  listening_socket = 0;
-  sd0(event_fd);
-  std::cout << "UDP ipc disabled" << std::endl;
-  return (K)0;
-}
 K udp_read_msg(int d) {
   int ready = poll(fds, 1, 0);
   if (ready && (fds[0].revents & POLLIN)) udp_dequeue(listening_socket);
   return (K)0;
+}
+
+// Functions exposed to q
+extern "C" K udp_send(K sock, K msg) {
+  if (sock->t != -KI) return krr((S) "type");
+  return udp_send_base(sock->i, msg, SYNC_BYTE);
+}
+extern "C" K udp_send_async(K sock, K msg) {
+  if (sock->t != -KI) return krr((S) "type");
+  return udp_send_base(sock->i, msg, ASYNC_BYTE);
+}
+extern "C" K udp_register(K host, K port) {
+  if (host->t != -KS || port->t != -KI) return krr((S) "type");
+  int sock = socket(AF_INET, SOCK_DGRAM, 0);
+  timeval tv{};
+  tv.tv_sec = 30;
+  if (sock < 0) return krr((S) "socket creation failed");
+  setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+  sockaddr_in dest = get_socket_info(host->s, port->i);
+  if (dest.sin_family == 0) return krr((S) "failed to resolve host");
+  sock_to_addr[sock] = dest;
+  std::cout << "Registered host=" << host->s << ", port=" << port->i << ":"
+            << sock << std::endl;
+  return ki(sock);
+}
+extern "C" K udp_deregister(K sock) {
+  if (sock->t != -KI) return krr((S) "type");
+  bool removed = sock_to_addr.erase(sock->i) > 0;
+  if (removed) {
+    close(sock->i);
+    std::cout << "Deregistered socket " << sock->i << std::endl;
+  }
+  return kb(removed);
 }
 extern "C" K udp_event_loop_start() {
   if (loop_running) return krr((S) "event loop already running");
@@ -179,5 +172,14 @@ extern "C" K udp_event_loop_start() {
       sd1(-event_fd, udp_read_msg);
     };
   }
+  return (K)0;
+}
+extern "C" K udp_event_loop_stop() {
+  if (!loop_running) return krr((S) "event loop already stopped");
+  loop_running = false;
+  close(listening_socket);
+  listening_socket = 0;
+  sd0(event_fd);
+  std::cout << "UDP ipc disabled" << std::endl;
   return (K)0;
 }
